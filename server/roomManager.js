@@ -1,7 +1,17 @@
 'use strict';
 
 const crypto = require('crypto');
-const { createGame, resolveBlackPlayerId, placeStone, toPublicGame, BLACK, WHITE } = require('./game');
+const {
+  createGame,
+  resolveBlackPlayerId,
+  placeStone,
+  toPublicGame,
+  applyTimeoutLoss,
+  pauseTurnClock,
+  resumeTurnClock,
+  BLACK,
+  WHITE,
+} = require('./game');
 const { ErrorCode } = require('./protocol');
 
 const RECONNECT_GRACE_MS = 60_000;
@@ -43,6 +53,8 @@ class RoomManager {
       leaveRequestFrom: null,
       disconnected: new Map(),
       disconnectTimers: new Map(),
+      turnTimer: null,
+      score: { wins: new Map(), draws: 0 },
       lanShareBase: null,
     };
 
@@ -115,6 +127,8 @@ class RoomManager {
 
     if (room.status === 'paused' && this.allConnected(room) && room.game && room.game.winner === null) {
       room.status = 'playing';
+      room.game = resumeTurnClock(room.game);
+      this.scheduleTurnTimer(room);
     } else if (room.status === 'waiting' && room.players.size === 2 && !room.game) {
       this.tryStartGame(room);
     }
@@ -134,9 +148,9 @@ class RoomManager {
     room.status = 'playing';
     room.rematchReady = new Map();
     room.leaveRequestFrom = null;
+    this.scheduleTurnTimer(room);
   }
 
-  /** 进行中且双方在线时，离开需对方同意 */
   needsLeaveConsent(room) {
     return (
       (room.status === 'playing' || room.status === 'paused') &&
@@ -165,6 +179,10 @@ class RoomManager {
       room.status = 'finished';
       room.rematchReady = new Map();
       room.leaveRequestFrom = null;
+      this.clearTurnTimer(room);
+      this.recordGameResult(room);
+    } else {
+      this.scheduleTurnTimer(room);
     }
     return { ok: true, room };
   }
@@ -224,6 +242,57 @@ class RoomManager {
     room.status = 'playing';
     room.rematchReady = new Map();
     room.leaveRequestFrom = null;
+    this.scheduleTurnTimer(room);
+  }
+
+  scheduleTurnTimer(room) {
+    this.clearTurnTimer(room);
+    if (room.status !== 'playing' || !room.game || room.game.winner !== null || !room.game.turnDeadline) {
+      return;
+    }
+    const delay = Math.max(0, room.game.turnDeadline - Date.now());
+    room.turnTimer = setTimeout(() => {
+      this.onTurnTimeout(room.id);
+    }, delay);
+  }
+
+  clearTurnTimer(room) {
+    if (room.turnTimer) {
+      clearTimeout(room.turnTimer);
+      room.turnTimer = null;
+    }
+  }
+
+  onTurnTimeout(roomId) {
+    const room = this.rooms.get(roomId);
+    if (!room || room.status !== 'playing' || !room.game || room.game.winner !== null) return;
+    if (!room.game.turnDeadline || Date.now() < room.game.turnDeadline - 20) return;
+
+    room.game = applyTimeoutLoss(room.game);
+    room.status = 'finished';
+    room.rematchReady = new Map();
+    room.leaveRequestFrom = null;
+    this.clearTurnTimer(room);
+    this.recordGameResult(room);
+
+    if (typeof this.onRoomChanged === 'function') {
+      this.onRoomChanged({ ok: true, room, dissolved: false });
+    }
+  }
+
+  recordGameResult(room) {
+    const game = room.game;
+    if (!game || game.winner === null || game.scoreRecorded) return;
+    game.scoreRecorded = true;
+    if (!room.score) {
+      room.score = { wins: new Map(), draws: 0 };
+    }
+    if (game.winner === 0) {
+      room.score.draws += 1;
+      return;
+    }
+    const winnerId = game.winner === BLACK ? game.blackPlayerId : game.whitePlayerId;
+    room.score.wins.set(winnerId, (room.score.wins.get(winnerId) || 0) + 1);
   }
 
   requestLeave(playerId) {
@@ -303,6 +372,7 @@ class RoomManager {
     }
 
     this.clearDisconnect(room, playerId);
+    this.clearTurnTimer(room);
 
     const others = [...room.players.values()]
       .filter((p) => p.id !== playerId)
@@ -318,7 +388,6 @@ class RoomManager {
       return { ok: true, room: null, dissolved: true, roomId, others };
     }
 
-    // guest left
     room.game = null;
     room.status = 'waiting';
     room.rematchReady = new Map();
@@ -340,6 +409,10 @@ class RoomManager {
 
     if (room.status === 'playing') {
       room.status = 'paused';
+      if (room.game) {
+        room.game = pauseTurnClock(room.game);
+      }
+      this.clearTurnTimer(room);
     }
 
     const timer = setTimeout(() => {
@@ -373,6 +446,7 @@ class RoomManager {
   dissolveRoom(roomId) {
     const room = this.rooms.get(roomId);
     if (!room) return;
+    this.clearTurnTimer(room);
     for (const timer of room.disconnectTimers.values()) clearTimeout(timer);
     for (const pid of room.players.keys()) {
       this.playerRoom.delete(pid);
@@ -393,11 +467,6 @@ class RoomManager {
     return true;
   }
 
-  /**
-   * @param {any} room
-   * @param {string} viewerId
-   * @param {string} shareBase e.g. http://192.168.1.2:3000
-   */
   buildSnapshot(room, viewerId, shareBase) {
     const players = [...room.players.values()].map((p) => ({
       id: p.id,
@@ -426,6 +495,14 @@ class RoomManager {
       rematchReady,
       leaveRequestFrom: room.leaveRequestFrom,
       shareUrl: `${shareBase}/?room=${room.id}`,
+      scoreboard: {
+        draws: room.score ? room.score.draws : 0,
+        players: players.map((p) => ({
+          id: p.id,
+          name: p.name,
+          wins: room.score ? room.score.wins.get(p.id) || 0 : 0,
+        })),
+      },
       youAre: {
         playerId: viewerId,
         color,

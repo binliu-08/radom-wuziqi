@@ -34,32 +34,70 @@
         </div>
       </section>
 
-      <section id="view-room" class="panel" hidden>
-        <div class="room-meta">
-          <div>
-            <span class="label">房间</span>
-            <strong id="room-id">------</strong>
+      <section id="view-room" class="room-view" hidden>
+        <aside id="turn-timer" class="turn-timer" hidden aria-live="polite">
+          <div class="turn-timer-dial" aria-hidden="true">
+            <svg class="turn-timer-ring" viewBox="0 0 72 72">
+              <circle class="ring-track" cx="36" cy="36" r="30" />
+              <circle id="turn-timer-ring" class="ring-progress" cx="36" cy="36" r="30" />
+            </svg>
+            <div class="turn-timer-face">
+              <span class="alarm-icon">
+                <svg viewBox="0 0 24 24" width="16" height="16" fill="none" stroke="currentColor" stroke-width="2">
+                  <circle cx="12" cy="13" r="6.5" />
+                  <path d="M12 10.2v3.2l1.8 1" stroke-linecap="round" />
+                  <path d="M5.2 4.8l2.6 2M18.8 4.8l-2.6 2" stroke-linecap="round" />
+                </svg>
+              </span>
+              <span id="turn-timer-text" class="turn-timer-count">20</span>
+            </div>
           </div>
-          <div id="color-badge" class="color-badge" hidden></div>
+          <span id="turn-timer-caption" class="turn-timer-caption">思考中</span>
+        </aside>
+
+        <div class="panel room-panel">
+          <div class="room-meta">
+            <div>
+              <span class="label">房间</span>
+              <strong id="room-id">------</strong>
+            </div>
+            <div id="color-badge" class="color-badge" hidden></div>
+          </div>
+          <p id="status-text" class="status-text">等待对手加入…</p>
+          <div id="share-box" class="share-box">
+            <input id="share-url" type="text" readonly />
+            <button id="btn-copy" class="btn" type="button">复制链接</button>
+          </div>
+          <div id="board-wrap" class="board-wrap" hidden>
+            <canvas id="board" width="600" height="600" aria-label="五子棋棋盘"></canvas>
+            <div id="result-modal" class="result-modal" hidden>
+              <div class="result-card">
+                <p id="result-title" class="result-title">对局结束</p>
+                <p id="result-hint" class="result-hint"></p>
+                <div class="result-actions">
+                  <button id="btn-rematch" class="btn primary" type="button">再来一局</button>
+                  <button id="btn-rematch-cancel" class="btn ghost" type="button" hidden>取消确认</button>
+                  <button id="btn-result-exit" class="btn" type="button">退出</button>
+                </div>
+              </div>
+            </div>
+          </div>
+          <div id="leave-actions" class="leave-actions" hidden>
+            <button id="btn-leave-accept" class="btn primary" type="button">同意离开</button>
+            <button id="btn-leave-reject" class="btn" type="button">拒绝</button>
+            <button id="btn-leave-cancel" class="btn ghost" type="button" hidden>取消离开申请</button>
+          </div>
+          <button id="btn-leave" class="btn ghost leave" type="button">离开房间</button>
         </div>
-        <p id="status-text" class="status-text">等待对手加入…</p>
-        <div id="share-box" class="share-box">
-          <input id="share-url" type="text" readonly />
-          <button id="btn-copy" class="btn" type="button">复制链接</button>
-        </div>
-        <div id="board-wrap" class="board-wrap" hidden>
-          <canvas id="board" width="600" height="600" aria-label="五子棋棋盘"></canvas>
-        </div>
-        <div id="finished-actions" class="finished-actions" hidden>
-          <button id="btn-rematch" class="btn primary" type="button">再来一局</button>
-          <button id="btn-rematch-cancel" class="btn ghost" type="button" hidden>取消确认</button>
-        </div>
-        <div id="leave-actions" class="leave-actions" hidden>
-          <button id="btn-leave-accept" class="btn primary" type="button">同意离开</button>
-          <button id="btn-leave-reject" class="btn" type="button">拒绝</button>
-          <button id="btn-leave-cancel" class="btn ghost" type="button" hidden>取消离开申请</button>
-        </div>
-        <button id="btn-leave" class="btn ghost leave" type="button">离开房间</button>
+
+        <aside id="scoreboard" class="scoreboard" hidden>
+          <h2 class="scoreboard-title">对战记录</h2>
+          <ul id="scoreboard-players" class="scoreboard-players"></ul>
+          <div class="scoreboard-draws">
+            <span>和棋</span>
+            <strong id="scoreboard-draws">0</strong>
+          </div>
+        </aside>
       </section>
     </div>
     <script src="/app.js"></script>

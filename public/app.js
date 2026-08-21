@@ -13,14 +13,24 @@
     roomId: document.getElementById('room-id'),
     colorBadge: document.getElementById('color-badge'),
     statusText: document.getElementById('status-text'),
+    turnTimer: document.getElementById('turn-timer'),
+    turnTimerText: document.getElementById('turn-timer-text'),
+    turnTimerRing: document.getElementById('turn-timer-ring'),
+    turnTimerCaption: document.getElementById('turn-timer-caption'),
+    scoreboard: document.getElementById('scoreboard'),
+    scoreboardPlayers: document.getElementById('scoreboard-players'),
+    scoreboardDraws: document.getElementById('scoreboard-draws'),
     shareBox: document.getElementById('share-box'),
     shareUrl: document.getElementById('share-url'),
     btnCopy: document.getElementById('btn-copy'),
     boardWrap: document.getElementById('board-wrap'),
     board: document.getElementById('board'),
-    finishedActions: document.getElementById('finished-actions'),
+    resultModal: document.getElementById('result-modal'),
+    resultTitle: document.getElementById('result-title'),
+    resultHint: document.getElementById('result-hint'),
     btnRematch: document.getElementById('btn-rematch'),
     btnRematchCancel: document.getElementById('btn-rematch-cancel'),
+    btnResultExit: document.getElementById('btn-result-exit'),
     leaveActions: document.getElementById('leave-actions'),
     btnLeaveAccept: document.getElementById('btn-leave-accept'),
     btnLeaveReject: document.getElementById('btn-leave-reject'),
@@ -36,6 +46,7 @@
     room: null,
     hover: null,
     reconnectAttempted: false,
+    timerInterval: null,
   };
 
   els.displayName.value = localStorage.getItem(NAME_KEY) || '';
@@ -60,15 +71,51 @@
   });
 
   els.btnCopy.addEventListener('click', async () => {
-    const url = els.shareUrl.value;
-    try {
-      await navigator.clipboard.writeText(url);
-      showToast('链接已复制');
-    } catch {
+    const url = (els.shareUrl.value || '').trim() ||
+      (state.room ? `${location.origin}/?room=${state.room.roomId}` : '');
+    if (!url) {
+      showToast('暂无链接可复制');
+      return;
+    }
+    els.shareUrl.value = url;
+    const ok = await copyText(url);
+    showToast(ok ? '链接已复制' : '复制失败，请长按链接手动复制');
+    if (!ok) {
+      els.shareUrl.focus();
       els.shareUrl.select();
-      showToast('请手动复制链接');
     }
   });
+
+  async function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) {
+      try {
+        await navigator.clipboard.writeText(text);
+        return true;
+      } catch {
+        // fall through
+      }
+    }
+    try {
+      const ta = document.createElement('textarea');
+      ta.value = text;
+      ta.setAttribute('readonly', '');
+      ta.style.position = 'fixed';
+      ta.style.top = '0';
+      ta.style.left = '0';
+      ta.style.width = '1px';
+      ta.style.height = '1px';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.focus();
+      ta.select();
+      ta.setSelectionRange(0, text.length);
+      const ok = document.execCommand('copy');
+      document.body.removeChild(ta);
+      return ok;
+    } catch {
+      return false;
+    }
+  }
 
   els.btnLeave.addEventListener('click', () => {
     const room = state.room;
@@ -87,6 +134,10 @@
 
   els.btnRematch.addEventListener('click', () => send('rematch_ready', {}));
   els.btnRematchCancel.addEventListener('click', () => send('rematch_cancel', {}));
+  els.btnResultExit.addEventListener('click', () => {
+    send('leave', {});
+    resetToLobby('已离开房间');
+  });
 
   els.board.addEventListener('pointermove', (e) => {
     const cell = pointerToCell(e);
@@ -215,13 +266,93 @@
 
   function resetToLobby(message) {
     state.room = null;
+    stopTurnCountdown();
     els.lobby.hidden = false;
     els.room.hidden = true;
+    els.resultModal.hidden = true;
+    els.turnTimer.hidden = true;
+    if (els.scoreboard) els.scoreboard.hidden = true;
     // Clear room query without reload
     if (location.search) {
       history.replaceState({}, '', location.pathname);
     }
     if (message) showToast(message);
+  }
+
+  function isMyTurn(room) {
+    const g = room?.game;
+    if (!g || room.status !== 'playing') return false;
+    const myId = room.youAre.playerId;
+    return (
+      (g.current === 1 && g.blackPlayerId === myId) || (g.current === 2 && g.whitePlayerId === myId)
+    );
+  }
+
+  function stopTurnCountdown() {
+    if (state.timerInterval) {
+      clearInterval(state.timerInterval);
+      state.timerInterval = null;
+    }
+  }
+
+  function updateTurnTimerDisplay() {
+    const room = state.room;
+    const game = room?.game;
+    // 只要本局棋盘还在，左侧栏就保持占位，避免换手时页面跳动
+    if (!room || !game || room.status === 'waiting') {
+      els.turnTimer.hidden = true;
+      return;
+    }
+
+    els.turnTimer.hidden = false;
+    const myTurn = isMyTurn(room);
+    const total = game.turnSeconds || 20;
+    const circumference = 2 * Math.PI * 30;
+
+    if (room.status === 'finished') {
+      els.turnTimerText.textContent = '—';
+      els.turnTimerCaption.textContent = '本局结束';
+      els.turnTimer.classList.remove('urgent', 'waiting-opponent');
+      if (els.turnTimerRing) {
+        els.turnTimerRing.style.strokeDasharray = String(circumference);
+        els.turnTimerRing.style.strokeDashoffset = String(circumference);
+      }
+      return;
+    }
+
+    if (room.status === 'paused' || !game.turnDeadline) {
+      const remainSec =
+        game.turnRemainingMs != null
+          ? Math.ceil(game.turnRemainingMs / 1000)
+          : '—';
+      els.turnTimerText.textContent = String(remainSec);
+      els.turnTimerCaption.textContent = '已暂停';
+      els.turnTimer.classList.remove('urgent');
+      els.turnTimer.classList.add('waiting-opponent');
+      return;
+    }
+
+    const remainMs = Math.max(0, game.turnDeadline - Date.now());
+    const remain = Math.ceil(remainMs / 1000);
+    const progress = Math.min(1, Math.max(0, remainMs / (total * 1000)));
+
+    els.turnTimerText.textContent = String(remain);
+    els.turnTimerCaption.textContent = myTurn ? '思考中' : '对方思考';
+    els.turnTimer.classList.toggle('urgent', myTurn && remain <= 5);
+    els.turnTimer.classList.toggle('waiting-opponent', !myTurn);
+    if (els.turnTimerRing) {
+      els.turnTimerRing.style.strokeDasharray = String(circumference);
+      els.turnTimerRing.style.strokeDashoffset = String(circumference * (1 - progress));
+    }
+  }
+
+  function syncTurnCountdown() {
+    stopTurnCountdown();
+    updateTurnTimerDisplay();
+    // 对局中持续刷新，换手也不卸掉侧栏
+    if (state.room?.game && state.room.status !== 'waiting') {
+      state.timerInterval = setInterval(updateTurnTimerDisplay, 200);
+    }
   }
 
   function renderRoom() {
@@ -249,17 +380,94 @@
     els.boardWrap.hidden = !hasBoard;
     if (hasBoard) drawBoard();
 
-    els.finishedActions.hidden = room.status !== 'finished';
-    if (room.status === 'finished') {
-      const ready = !!room.youAre?.rematchReady;
-      els.btnRematch.hidden = ready;
-      els.btnRematchCancel.hidden = !ready;
-      els.btnRematch.disabled = false;
-    }
-
+    renderResultModal(room);
     renderLeaveActions(room);
+    renderScoreboard(room);
+    syncTurnCountdown();
 
     els.statusText.textContent = statusLabel(room);
+  }
+
+  function renderScoreboard(room) {
+    if (!els.scoreboard) return;
+    const board = room.scoreboard;
+    if (!board || !room.players.length) {
+      els.scoreboard.hidden = true;
+      return;
+    }
+    els.scoreboard.hidden = false;
+    const myId = room.youAre.playerId;
+    const players = board.players && board.players.length
+      ? board.players
+      : room.players.map((p) => ({ id: p.id, name: p.name, wins: 0 }));
+
+    els.scoreboardPlayers.innerHTML = players
+      .map((p) => {
+        const me = p.id === myId ? ' me' : '';
+        const name = escapeHtml(p.name || '玩家');
+        return `<li class="scoreboard-player${me}">
+          <span class="scoreboard-name">${name}${p.id === myId ? '（你）' : ''}</span>
+          <span class="scoreboard-wins">${Number(p.wins) || 0}</span>
+          <span class="scoreboard-wins-label">胜</span>
+        </li>`;
+      })
+      .join('');
+    els.scoreboardDraws.textContent = String(board.draws || 0);
+  }
+
+  function escapeHtml(text) {
+    return String(text)
+      .replace(/&/g, '&amp;')
+      .replace(/</g, '&lt;')
+      .replace(/>/g, '&gt;')
+      .replace(/"/g, '&quot;');
+  }
+
+  function resultText(room) {
+    const g = room.game;
+    const myId = room.youAre.playerId;
+    if (!g || g.winner === null) return { title: '对局结束', kind: '' };
+    if (g.winner === 0) return { title: '和棋', kind: 'draw' };
+    if (g.winner === 1) {
+      return g.blackPlayerId === myId
+        ? { title: '你赢了', kind: 'win' }
+        : { title: '你输了', kind: 'lose' };
+    }
+    return g.whitePlayerId === myId
+      ? { title: '你赢了', kind: 'win' }
+      : { title: '你输了', kind: 'lose' };
+  }
+
+  function rematchHint(room) {
+    const g = room.game;
+    let base = '双方都确认后开始新局';
+    if (g?.winReason === 'timeout') {
+      base = '超时判负 · 双方都确认后开始新局';
+    }
+    const myId = room.youAre.playerId;
+    const readyMap = room.rematchReady || {};
+    const opponent = room.players.find((p) => p.id !== myId);
+    const oppReady = opponent ? !!readyMap[opponent.id] : false;
+    const meReady = !!readyMap[myId];
+    if (meReady && !oppReady) return g?.winReason === 'timeout' ? '超时判负 · 已确认，等待对方确认' : '已确认，等待对方确认';
+    if (!meReady && oppReady) return g?.winReason === 'timeout' ? '超时判负 · 对方已确认再来一局' : '对方已确认再来一局';
+    if (meReady && oppReady) return '双方已确认，即将开局';
+    return base;
+  }
+
+  function renderResultModal(room) {
+    const show = room.status === 'finished' && !!room.game;
+    els.resultModal.hidden = !show;
+    if (!show) return;
+
+    const { title, kind } = resultText(room);
+    els.resultTitle.textContent = title;
+    els.resultTitle.className = `result-title${kind ? ` ${kind}` : ''}`;
+    els.resultHint.textContent = rematchHint(room);
+
+    const ready = !!room.youAre?.rematchReady;
+    els.btnRematch.hidden = ready;
+    els.btnRematchCancel.hidden = !ready;
   }
 
   function needsLeaveConsent(room) {
@@ -271,6 +479,14 @@
   function renderLeaveActions(room) {
     const from = room.leaveRequestFrom;
     const myId = room.youAre.playerId;
+    const finished = room.status === 'finished';
+
+    if (finished && !from) {
+      els.leaveActions.hidden = true;
+      els.btnLeave.hidden = true;
+      return;
+    }
+
     if (!from) {
       els.leaveActions.hidden = true;
       els.btnLeave.hidden = false;
@@ -301,33 +517,14 @@
       return '对手已断开，对局暂停（约 60 秒内可重连；你可直接离开）';
     }
     if (room.status === 'finished') {
-      const g = room.game;
-      const myId = room.youAre.playerId;
-      const readyMap = room.rematchReady || {};
-      const opponent = room.players.find((p) => p.id !== myId);
-      const oppReady = opponent ? !!readyMap[opponent.id] : false;
-      const meReady = !!readyMap[myId];
-
-      let result = '对局结束';
-      if (g.winner === 0) result = '和棋';
-      else if (g.winner === 1) {
-        result = g.blackPlayerId === myId ? '你赢了' : '你输了';
-      } else if (g.winner === 2) {
-        result = g.whitePlayerId === myId ? '你赢了' : '你输了';
-      }
-
-      if (meReady && !oppReady) return `${result} · 已确认，等待对方确认再来一局`;
-      if (!meReady && oppReady) return `${result} · 对方已确认再来一局`;
-      if (meReady && oppReady) return `${result} · 双方已确认，即将开局`;
-      return `${result} · 点击「再来一局」确认（需双方确认）`;
+      return '本局已结束';
     }
 
     // playing
     const g = room.game;
-    const myTurn =
-      (g.current === 1 && g.blackPlayerId === room.youAre.playerId) ||
-      (g.current === 2 && g.whitePlayerId === room.youAre.playerId);
-    return myTurn ? '轮到你落子' : '等待对方落子';
+    const myTurn = isMyTurn(room);
+    if (myTurn) return '轮到你落子（限时 20 秒）';
+    return '等待对方落子';
   }
 
   function pointerToCell(e) {
@@ -394,6 +591,10 @@
           if (v) drawStone(pad + x * cell, pad + y * cell, cell, v === 1);
         }
       }
+      const last = game.lastMove;
+      if (last) {
+        drawLastMoveMark(pad + last.x * cell, pad + last.y * cell, cell, game.board[last.y][last.x] === 1);
+      }
     }
 
     const canHover =
@@ -427,6 +628,14 @@
     ctx.strokeStyle = isBlack ? 'rgba(0,0,0,0.5)' : 'rgba(80,60,40,0.35)';
     ctx.lineWidth = 1;
     ctx.stroke();
+  }
+
+  function drawLastMoveMark(cx, cy, cell, isBlack) {
+    const r = Math.max(3, cell * 0.12);
+    ctx.beginPath();
+    ctx.arc(cx, cy, r, 0, Math.PI * 2);
+    ctx.fillStyle = isBlack ? '#e8c15a' : '#c0392b';
+    ctx.fill();
   }
 
   let toastTimer = null;

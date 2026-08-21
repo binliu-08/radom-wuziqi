@@ -6,6 +6,7 @@ const {
   placeStone,
   resolveBlackPlayerId,
   hasFiveInARow,
+  applyTimeoutLoss,
   BLACK,
   WHITE,
 } = require('./game');
@@ -13,7 +14,6 @@ const {
 function testWinHorizontal() {
   const game = createGame('a', 'b');
   let g = game;
-  // Black places 5 in a row on y=7
   for (let x = 0; x < 4; x++) {
     let r = placeStone(g, 'a', x, 7);
     assert.ok(r.ok);
@@ -52,8 +52,16 @@ function testFiveHelper() {
   assert.ok(hasFiveInARow(board, 2, 3, BLACK));
 }
 
+function testTimeoutLoss() {
+  const game = createGame('a', 'b');
+  const next = applyTimeoutLoss(game);
+  assert.strictEqual(next.winner, WHITE);
+  assert.strictEqual(next.winReason, 'timeout');
+}
+
 testWinHorizontal();
 testNotYourTurn();
 testResolveBlack();
 testFiveHelper();
+testTimeoutLoss();
 console.log('game.test.js: all passed');

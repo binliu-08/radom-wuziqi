@@ -4,6 +4,8 @@ const BOARD_SIZE = 15;
 const EMPTY = 0;
 const BLACK = 1;
 const WHITE = 2;
+const TURN_SECONDS = 20;
+const TURN_MS = TURN_SECONDS * 1000;
 
 /**
  * @typedef {{
@@ -13,6 +15,10 @@ const WHITE = 2;
  *   current: 1 | 2,
  *   winner: null | 0 | 1 | 2,
  *   moveCount: number,
+ *   lastMove: null | { x: number, y: number },
+ *   turnDeadline: number | null,
+ *   turnRemainingMs: number | null,
+ *   winReason: null | 'timeout',
  * }} GameState
  */
 
@@ -29,6 +35,10 @@ function createGame(blackPlayerId, whitePlayerId) {
     current: BLACK,
     winner: null,
     moveCount: 0,
+    lastMove: null,
+    turnDeadline: Date.now() + TURN_MS,
+    turnRemainingMs: null,
+    winReason: null,
   };
 }
 
@@ -81,21 +91,66 @@ function placeStone(game, playerId, x, y) {
     ...game,
     board: game.board.map((row) => row.slice()),
     moveCount: game.moveCount + 1,
+    lastMove: { x, y },
+    turnRemainingMs: null,
+    winReason: null,
   };
   next.board[y][x] = game.current;
 
   if (hasFiveInARow(next.board, x, y, game.current)) {
     next.winner = game.current;
+    next.turnDeadline = null;
     return { ok: true, game: next };
   }
 
   if (next.moveCount >= BOARD_SIZE * BOARD_SIZE) {
     next.winner = 0;
+    next.turnDeadline = null;
     return { ok: true, game: next };
   }
 
   next.current = game.current === BLACK ? WHITE : BLACK;
+  next.turnDeadline = Date.now() + TURN_MS;
   return { ok: true, game: next };
+}
+
+/**
+ * 当前行棋方超时，判对方胜
+ * @param {GameState} game
+ * @returns {GameState}
+ */
+function applyTimeoutLoss(game) {
+  if (game.winner !== null) return game;
+  const winner = game.current === BLACK ? WHITE : BLACK;
+  return {
+    ...game,
+    winner,
+    turnDeadline: null,
+    turnRemainingMs: null,
+    winReason: 'timeout',
+  };
+}
+
+function pauseTurnClock(game) {
+  if (!game || game.winner !== null || !game.turnDeadline) {
+    return { ...game, turnDeadline: null };
+  }
+  const remaining = Math.max(0, game.turnDeadline - Date.now());
+  return {
+    ...game,
+    turnDeadline: null,
+    turnRemainingMs: remaining,
+  };
+}
+
+function resumeTurnClock(game) {
+  if (!game || game.winner !== null) return game;
+  const remaining = game.turnRemainingMs != null ? game.turnRemainingMs : TURN_MS;
+  return {
+    ...game,
+    turnDeadline: Date.now() + Math.max(0, remaining),
+    turnRemainingMs: null,
+  };
 }
 
 /**
@@ -144,6 +199,10 @@ function toPublicGame(game) {
     current: game.current,
     winner: game.winner,
     moveCount: game.moveCount,
+    lastMove: game.lastMove,
+    turnDeadline: game.turnDeadline,
+    turnSeconds: TURN_SECONDS,
+    winReason: game.winReason,
   };
 }
 
@@ -152,9 +211,14 @@ module.exports = {
   EMPTY,
   BLACK,
   WHITE,
+  TURN_SECONDS,
+  TURN_MS,
   createGame,
   resolveBlackPlayerId,
   placeStone,
+  applyTimeoutLoss,
+  pauseTurnClock,
+  resumeTurnClock,
   hasFiveInARow,
   toPublicGame,
 };
