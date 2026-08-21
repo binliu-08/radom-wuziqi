@@ -1,0 +1,67 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <title>局域网五子棋</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link
+      href="https://fonts.googleapis.com/css2?family=Noto+Serif+SC:wght@500;700&family=Source+Sans+3:wght@400;600&display=swap"
+      rel="stylesheet"
+    />
+    <link rel="stylesheet" href="/styles.css" />
+  </head>
+  <body>
+    <div class="app">
+      <header class="brand">
+        <h1>五子棋</h1>
+        <p class="tagline">局域网双人对战</p>
+      </header>
+
+      <p id="toast" class="toast" hidden></p>
+
+      <section id="view-lobby" class="panel">
+        <label class="field">
+          <span>昵称</span>
+          <input id="display-name" type="text" maxlength="16" placeholder="玩家" autocomplete="nickname" />
+        </label>
+        <button id="btn-create" class="btn primary" type="button">创建房间</button>
+        <div class="divider"><span>或加入</span></div>
+        <div class="join-row">
+          <input id="room-input" type="text" maxlength="6" placeholder="房间号" autocomplete="off" />
+          <button id="btn-join" class="btn" type="button">加入</button>
+        </div>
+      </section>
+
+      <section id="view-room" class="panel" hidden>
+        <div class="room-meta">
+          <div>
+            <span class="label">房间</span>
+            <strong id="room-id">------</strong>
+          </div>
+          <div id="color-badge" class="color-badge" hidden></div>
+        </div>
+        <p id="status-text" class="status-text">等待对手加入…</p>
+        <div id="share-box" class="share-box">
+          <input id="share-url" type="text" readonly />
+          <button id="btn-copy" class="btn" type="button">复制链接</button>
+        </div>
+        <div id="board-wrap" class="board-wrap" hidden>
+          <canvas id="board" width="600" height="600" aria-label="五子棋棋盘"></canvas>
+        </div>
+        <div id="finished-actions" class="finished-actions" hidden>
+          <button id="btn-rematch" class="btn primary" type="button">再来一局</button>
+          <button id="btn-rematch-cancel" class="btn ghost" type="button" hidden>取消确认</button>
+        </div>
+        <div id="leave-actions" class="leave-actions" hidden>
+          <button id="btn-leave-accept" class="btn primary" type="button">同意离开</button>
+          <button id="btn-leave-reject" class="btn" type="button">拒绝</button>
+          <button id="btn-leave-cancel" class="btn ghost" type="button" hidden>取消离开申请</button>
+        </div>
+        <button id="btn-leave" class="btn ghost leave" type="button">离开房间</button>
+      </section>
+    </div>
+    <script src="/app.js"></script>
+  </body>
+</html>
